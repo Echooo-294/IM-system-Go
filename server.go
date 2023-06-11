@@ -17,17 +17,18 @@ type Server struct {
 	// 服务器消息广播通道
 	Chan_s chan string
 
-	broadcast_len_limit int
+	// 用户消息长度限制
+	usr_len_limit int
 }
 
 // 创建一个server
 func NewServer(ip string, port int) *Server {
 	server := &Server{
-		Ip:                  ip,
-		Port:                port,
-		OnlineMap:           make(map[string]*User),
-		Chan_s:              make(chan string),
-		broadcast_len_limit: 4096,
+		Ip:            ip,
+		Port:          port,
+		OnlineMap:     make(map[string]*User),
+		Chan_s:        make(chan string),
+		usr_len_limit: 4096,
 	}
 	return server
 }
@@ -84,7 +85,7 @@ func (server *Server) Broadcast_usrMsg(usr *User, msg string) {
 
 // 接收用户输入的消息进行广播
 func (server *Server) Receive_usrMsg(usr *User, conn net.Conn) {
-	buf := make([]byte, server.broadcast_len_limit)
+	buf := make([]byte, server.usr_len_limit)
 	for {
 		// 考虑是否需要在某处结束协程
 
