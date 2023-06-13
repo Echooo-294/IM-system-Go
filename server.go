@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strconv"
 	"sync"
 )
 
@@ -40,7 +41,7 @@ func (server *Server) Start() {
 	// socket listen
 	listener, err := net.Listen("tcp", fmt.Sprintf("%s:%d", server.Ip, server.Port))
 	if err != nil {
-		fmt.Println("net.Listen err:", err)
+		fmt.Println("net.Listen err: ", err)
 		return
 	}
 
@@ -58,7 +59,7 @@ func (server *Server) Start() {
 		if err == nil {
 			go server.Handler(conn)
 		} else {
-			fmt.Println("listener accept err:", err)
+			fmt.Println("listener accept err: ", err)
 		}
 	}
 }
@@ -77,14 +78,20 @@ func (server *Server) ListenServerMsg() {
 	}
 }
 
+// 服务器进行消息广播
+func (server *Server) BroadcastServerMsg(msg string) {
+	serverMsg := "The Current Server : " + msg
+	server.Chan_s <- serverMsg
+}
+
 // 将某用户的消息写入广播通道
-func (server *Server) Broadcast_usrMsg(usr *User, msg string) {
+func (server *Server) BroadcastUsrMsg(usr *User, msg string) {
 	usrMsg := "The user (" + usr.Name + ") : " + msg
 	server.Chan_s <- usrMsg
 }
 
-// 接收用户输入的消息进行广播
-func (server *Server) Receive_usrMsg(usr *User, conn net.Conn) {
+// 持续接收用户输入的消息进行处理
+func (server *Server) ReceiveUsrMsg(usr *User, conn net.Conn) {
 	buf := make([]byte, server.usr_len_limit)
 	for {
 		// 考虑是否需要在某处结束协程
@@ -92,7 +99,7 @@ func (server *Server) Receive_usrMsg(usr *User, conn net.Conn) {
 		n, err := conn.Read(buf)
 		// 消息为空（退出程序）表示下线
 		if n == 0 {
-			server.Broadcast_usrMsg(usr, " is Offline~")
+			usr.Offline()
 			return
 		}
 		// 有错误，且错误不为EOF结束符
@@ -103,25 +110,39 @@ func (server *Server) Receive_usrMsg(usr *User, conn net.Conn) {
 
 		// 读取n-1个字符，不读取最后的'\n'，进行消息广播
 		msg := string(buf[:n-1])
-		server.Broadcast_usrMsg(usr, msg)
+
+		// 用户消息业务
+		usr.DoMsg(msg)
 	}
+}
+
+// 登记用户信息
+func (server *Server) RegisterUsr(usr *User) {
+	server.mapLock.Lock()
+	server.OnlineMap[usr.Name] = usr
+	server.mapLock.Unlock()
+}
+
+// 删除用户信息
+func (server *Server) DeleteUsr(usr *User) {
+	server.mapLock.Lock()
+	delete(server.OnlineMap, usr.Name)
+	server.mapLock.Unlock()
 }
 
 // 业务处理
 func (server *Server) Handler(conn net.Conn) {
 	// 接收链接后新建一个usr
-	usr := NewUser(conn)
+	usr := NewUser(conn, server)
 
-	// 登记用户信息
-	server.mapLock.Lock()
-	server.OnlineMap[usr.Name] = usr
-	server.mapLock.Unlock()
+	// 用户上线，登记并广播
+	usr.Online()
 
-	// 对用户上线消息进行广播
-	server.Broadcast_usrMsg(usr, " is Online!")
+	// 服务器广播当前用户人数
+	server.BroadcastServerMsg(strconv.Itoa(len(server.OnlineMap)))
 
-	// 接收用户输入的消息进行广播
-	go server.Receive_usrMsg(usr, conn)
+	// 持续接收用户输入的消息进行处理
+	go server.ReceiveUsrMsg(usr, conn)
 
 	// 阻塞避免主协程结束
 	select {}
