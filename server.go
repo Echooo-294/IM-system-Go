@@ -130,6 +130,21 @@ func (server *Server) DeleteUsr(usr *User) {
 	server.mapLock.Unlock()
 }
 
+// 获取服务器当前在线人数
+func (server *Server) getUsrNum() int {
+	server.mapLock.Lock()
+	num := len(server.OnlineMap)
+	server.mapLock.Unlock()
+	return num
+}
+
+// 用户上线后的服务器广播公告
+func (server *Server) NoticeOnline() {
+	// 提示当前在线人数
+	msg := "当前 " + strconv.Itoa(server.getUsrNum()) + " 人在线."
+	server.BroadcastServerMsg(msg)
+}
+
 // 业务处理
 func (server *Server) Handler(conn net.Conn) {
 	// 接收链接后新建一个usr
@@ -138,8 +153,8 @@ func (server *Server) Handler(conn net.Conn) {
 	// 用户上线，登记并广播
 	usr.Online()
 
-	// 服务器广播当前用户人数
-	server.BroadcastServerMsg(strconv.Itoa(len(server.OnlineMap)))
+	// 用户上线后的服务器广播公告
+	server.NoticeOnline()
 
 	// 持续接收用户输入的消息进行处理
 	go server.ReceiveUsrMsg(usr, conn)
