@@ -51,8 +51,6 @@ func (server *Server) Start() {
 	// 启动监听广播通道的goroutine
 	go server.ListenServerMsg()
 
-	// defer fmt.Println("Our Server is CLOSED...")
-
 	// 持续接受链接
 	for {
 		conn, err := listener.Accept()
@@ -86,7 +84,7 @@ func (server *Server) BroadcastServerMsg(msg string) {
 
 // 将某用户的消息写入广播通道
 func (server *Server) BroadcastUsrMsg(usr *User, msg string) {
-	usrMsg := "The user (" + usr.Name + ") : " + msg
+	usrMsg := "The user [" + usr.Name + "] : " + msg
 	server.Chan_s <- usrMsg
 }
 
@@ -131,17 +129,31 @@ func (server *Server) DeleteUsr(usr *User) {
 }
 
 // 获取服务器当前在线人数
-func (server *Server) getUsrNum() int {
+func (server *Server) GetUsrNum() int {
 	server.mapLock.Lock()
 	num := len(server.OnlineMap)
 	server.mapLock.Unlock()
 	return num
 }
 
+// 获取服务器当前在线用户列表
+func (server *Server) GetUsrList() []string {
+	server.mapLock.Lock()
+	num := len(server.OnlineMap)
+	usrList := make([]string, num)
+	i := 0
+	for _, usr := range server.OnlineMap {
+		usrList[i] = usr.Name
+		i++
+	}
+	server.mapLock.Unlock()
+	return usrList
+}
+
 // 用户上线后的服务器广播公告
 func (server *Server) NoticeOnline() {
 	// 提示当前在线人数
-	msg := "当前 " + strconv.Itoa(server.getUsrNum()) + " 人在线."
+	msg := "当前 " + strconv.Itoa(server.GetUsrNum()) + " 人在线."
 	server.BroadcastServerMsg(msg)
 }
 
