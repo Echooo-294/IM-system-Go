@@ -2,6 +2,7 @@ package main
 
 import (
 	"net"
+	"strconv"
 )
 
 type User struct {
@@ -11,11 +12,6 @@ type User struct {
 	conn_u  net.Conn
 	server  *Server
 }
-
-// 生成随机用户名
-// func getRandName() string {
-
-// }
 
 // 创建一个user
 func NewUser(conn net.Conn, server *Server) *User {
@@ -61,16 +57,53 @@ func (usr *User) Offline() {
 	usr.server.BroadcastUsrMsg(usr, "is Offline~")
 }
 
+// num指令，查询当前在线用户人数
+func (usr *User) numCommand() {
+	num := usr.server.GetUsrNum()
+	usr.SendMsgToClient("当前在线用户有: " + strconv.Itoa(num) + " 个.\n")
+}
+
+// who指令，查询当前在线用户列表
+func (usr *User) whoCommand() {
+	newMsg := usr.server.GetUsrList()
+	usr.SendMsgToClient("当前在线用户有: \n")
+	for _, usrName := range newMsg {
+		usr.SendMsgToClient("[" + usrName + "]" + "\n")
+	}
+}
+
+// rename指令，重命名，指令格式为"rename:newName"
+func (usr *User) renameCommand(msg string) {
+	newName := msg[7:]
+	// 判断newName是否存在
+	usr.server.mapLock.Lock()
+	_, ok := usr.server.OnlineMap[newName]
+	if ok {
+		usr.SendMsgToClient("用户名已存在,请重新使用rename指令.\n")
+	} else {
+		delete(usr.server.OnlineMap, usr.Name)
+		usr.server.OnlineMap[newName] = usr
+		usr.Name = newName
+		usr.SendMsgToClient("用户名已更新.\n")
+	}
+	usr.server.mapLock.Unlock()
+}
+
 // 用户消息业务
 func (usr *User) DoMsg(msg string) {
 	//消息处理
-	if msg == "who" {
+	if msg == "exit" {
+		//下线，退出命令行
+
+	} else if msg == "who" {
 		//查询当前在线用户列表
-		newMsg := usr.server.GetUsrList()
-		usr.SendMsgToClient("当前在线用户有: \n")
-		for _, usrName := range newMsg {
-			usr.SendMsgToClient("[" + usrName + "]" + "\n")
-		}
+		usr.whoCommand()
+	} else if msg == "num" {
+		//查询当前在线用户人数
+		usr.numCommand()
+	} else if len(msg) > 7 && msg[:7] == "rename:" {
+		//重命名
+		usr.renameCommand(msg)
 	} else {
 		//调用服务器广播接口
 		usr.server.BroadcastUsrMsg(usr, msg)

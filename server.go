@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"strconv"
 	"sync"
 )
 
@@ -150,12 +149,12 @@ func (server *Server) GetUsrList() []string {
 	return usrList
 }
 
-// 用户上线后的服务器广播公告
-func (server *Server) NoticeOnline() {
-	// 提示当前在线人数
-	msg := "当前 " + strconv.Itoa(server.GetUsrNum()) + " 人在线."
-	server.BroadcastServerMsg(msg)
-}
+// // 对刚上线的用户进行服务器公告
+// func (server *Server) NoticeOnline() {
+// 	// 提示当前在线人数
+// 	msg := "当前 " + strconv.Itoa(server.GetUsrNum()) + " 人在线."
+// 	server.BroadcastServerMsg(msg)
+// }
 
 // 业务处理
 func (server *Server) Handler(conn net.Conn) {
@@ -165,8 +164,8 @@ func (server *Server) Handler(conn net.Conn) {
 	// 用户上线，登记并广播
 	usr.Online()
 
-	// 用户上线后的服务器广播公告
-	server.NoticeOnline()
+	// 对刚上线的用户进行服务器公告
+	// server.NoticeOnline()
 
 	// 持续接收用户输入的消息进行处理
 	go server.ReceiveUsrMsg(usr, conn)
