@@ -10,7 +10,7 @@ import (
 type Server struct {
 	Ip   string
 	Port int
-	// 用户信息表
+	// 用户信息表及其读写锁
 	OnlineMap map[string]*User
 	mapLock   sync.RWMutex
 
@@ -28,7 +28,7 @@ func NewServer(ip string, port int) *Server {
 		Port:          port,
 		OnlineMap:     make(map[string]*User),
 		Chan_s:        make(chan string),
-		usr_len_limit: 4096,
+		usr_len_limit: 128,
 	}
 	return server
 }
@@ -73,7 +73,7 @@ func (server *Server) ListenServerMsg() {
 	}
 }
 
-// 服务器进行消息广播
+// 将服务器的消息写入广播通道
 func (server *Server) BroadcastServerMsg(msg string) {
 	serverMsg := "The Current Server : " + msg
 	server.Chan_s <- serverMsg
@@ -95,9 +95,11 @@ func (server *Server) ReceiveUsrMsg(usr *User, conn net.Conn) {
 			usr.Offline()
 			return
 		}
+
 		// 有错误，且错误不为EOF结束符
 		if err != nil && err != io.EOF {
 			fmt.Println("Conn Read has err: ", err)
+			usr.SendMsgToClient("Conn Read has err,请检查客户端是否存在问题.\n")
 			return
 		}
 
@@ -105,7 +107,12 @@ func (server *Server) ReceiveUsrMsg(usr *User, conn net.Conn) {
 		msg := string(buf[:n-1])
 
 		// 用户消息业务
-		usr.DoMsg(msg)
+		status := usr.DoMsg(msg)
+
+		if status == -1 {
+			// 用户输入exit,退出处理该用户消息的协程
+			return
+		}
 	}
 }
 
@@ -132,7 +139,7 @@ func (server *Server) GetUsrNum() int {
 }
 
 // 获取服务器当前在线用户列表
-func (server *Server) GetUsrList() []string {
+func (server *Server) GetUsrList() ([]string, int) {
 	server.mapLock.Lock()
 	num := len(server.OnlineMap)
 	usrList := make([]string, num)
@@ -142,7 +149,7 @@ func (server *Server) GetUsrList() []string {
 		i++
 	}
 	server.mapLock.Unlock()
-	return usrList
+	return usrList, num
 }
 
 // // 对刚上线的用户进行服务器公告

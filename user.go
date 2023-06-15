@@ -1,8 +1,11 @@
 package main
 
 import (
+	"fmt"
+	"io"
 	"net"
 	"strconv"
+	"strings"
 )
 
 type User struct {
@@ -15,7 +18,7 @@ type User struct {
 
 // 创建一个user
 func NewUser(conn net.Conn, server *Server) *User {
-	//获取当前地址
+	// 获取当前地址
 	useraddr := conn.RemoteAddr().String()
 
 	usr := &User{
@@ -26,7 +29,7 @@ func NewUser(conn net.Conn, server *Server) *User {
 		server:  server,
 	}
 
-	//启动监听当前user channel的goroutine
+	// 启动监听当前user channel的goroutine
 	go usr.ListenUsrMsg()
 
 	return usr
@@ -50,9 +53,8 @@ func (usr *User) Online() {
 	usr.server.BroadcastUsrMsg(usr, "is Online!")
 }
 
-// 用户析构销毁
-func (usr *User) destroy() {
-	usr.server.DeleteUsr(usr)
+// 用户析构关闭资源
+func (usr *User) closeResources() {
 	close(usr.Chan_u)
 	usr.conn_u.Close()
 }
@@ -60,7 +62,8 @@ func (usr *User) destroy() {
 // 用户下线
 func (usr *User) Offline() {
 	usr.server.BroadcastUsrMsg(usr, "is Offline~")
-	usr.destroy()
+	usr.server.DeleteUsr(usr)
+	usr.closeResources()
 }
 
 // num指令，查询当前在线用户人数
@@ -71,21 +74,66 @@ func (usr *User) numCommand() {
 
 // who指令，查询当前在线用户列表
 func (usr *User) whoCommand() {
-	newMsg := usr.server.GetUsrList()
-	usr.SendMsgToClient("当前在线用户有: \n")
-	for _, usrName := range newMsg {
-		usr.SendMsgToClient("[" + usrName + "]" + "\n")
+	usrList, num := usr.server.GetUsrList()
+	usr.SendMsgToClient("当前在线用户有: " + strconv.Itoa(num) + " 个,包含以下用户:\n")
+	msg := ""
+	for k, usrName := range usrList {
+		msg += "[" + usrName + "]" + "; "
+		// 每行5个输出
+		if (k+1)%5 == 0 || k == num-1 {
+			usr.SendMsgToClient(msg + "\n")
+		}
+		k++
 	}
 }
 
-// rename指令，重命名，指令格式为"rename:newName"
-func (usr *User) renameCommand(msg string) {
-	newName := msg[7:]
+// 用户命名限制
+func (usr *User) nameLimit(usrName string) bool {
+	// 不能有空格,大于3字符,小于20字符
+	if strings.Contains(usrName, " ") {
+		return false
+	}
+	if len(usrName) >= 20 || len(usrName) <= 3 {
+		return false
+	}
+	return true
+}
+
+// rename指令，重命名
+func (usr *User) renameCommand() {
+	usr.SendMsgToClient("请输入新用户名(不能有空格,大于3字符,小于20字符): ")
+
+	// 读取用户输入
+	buf := make([]byte, 20)
+	n, err := usr.conn_u.Read(buf)
+
+	// 有错误，且错误不为EOF结束符
+	if err != nil && err != io.EOF {
+		fmt.Println("Conn Read has err: ", err)
+		usr.SendMsgToClient("Conn Read has err,请检查客户端是否存在问题.\n")
+		return
+	}
+
+	// 内容为空直接返回
+	if n == 0 {
+		return
+	}
+
+	// 读取n-1个字符，不读取最后的'\n'
+	newName := string(buf[:n-1])
+
+	// 文件名限制
+	allow := usr.nameLimit(newName)
+	if !allow {
+		usr.SendMsgToClient("用户名不符合规范,请重新使用rename.\n")
+		return
+	}
+
 	// 判断newName是否存在
 	usr.server.mapLock.Lock()
 	_, ok := usr.server.OnlineMap[newName]
 	if ok {
-		usr.SendMsgToClient("用户名已存在,请重新使用rename指令.\n")
+		usr.SendMsgToClient("用户名已存在,请重新使用rename.\n")
 	} else {
 		delete(usr.server.OnlineMap, usr.Name)
 		usr.server.OnlineMap[newName] = usr
@@ -96,23 +144,25 @@ func (usr *User) renameCommand(msg string) {
 }
 
 // 用户消息业务
-func (usr *User) DoMsg(msg string) {
-	//消息处理
-	if msg == "exit" {
-		//下线，退出命令行
-
-	} else if msg == "who" {
-		//查询当前在线用户列表
+func (usr *User) DoMsg(msg string) int {
+	// 消息处理
+	switch msg {
+	case "exit":
+		// 下线，退出命令行
+		usr.Offline()
+		return -1
+	case "who":
+		// 查询当前在线用户列表
 		usr.whoCommand()
-	} else if msg == "num" {
-		//查询当前在线用户人数
+	case "num":
+		// 查询当前在线用户人数
 		usr.numCommand()
-	} else if len(msg) > 7 && msg[:7] == "rename:" {
-		//重命名
-		usr.renameCommand(msg)
-	} else {
-		//调用服务器广播接口
+	case "rename":
+		// 重命名
+		usr.renameCommand()
+	default:
+		// 调用服务器广播接口
 		usr.server.BroadcastUsrMsg(usr, msg)
 	}
-
+	return 0
 }
