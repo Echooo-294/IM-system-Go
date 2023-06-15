@@ -53,8 +53,9 @@ func (usr *User) Online() {
 	usr.server.BroadcastUsrMsg(usr, "is Online!")
 }
 
-// 用户析构关闭资源
-func (usr *User) closeResources() {
+// 用户析构关闭资源,统一在server的Handler中defer析构
+func (usr *User) CloseResources() {
+	usr.server.DeleteUsr(usr)
 	close(usr.Chan_u)
 	usr.conn_u.Close()
 }
@@ -62,8 +63,11 @@ func (usr *User) closeResources() {
 // 用户下线
 func (usr *User) Offline() {
 	usr.server.BroadcastUsrMsg(usr, "is Offline~")
-	usr.server.DeleteUsr(usr)
-	usr.closeResources()
+}
+
+// 用户被强制踢出
+func (usr *User) ForceOffline() {
+	usr.SendMsgToClient("You are ForceOffline.\n")
 }
 
 // num指令，查询当前在线用户人数
@@ -109,7 +113,7 @@ func (usr *User) renameCommand() {
 
 	// 有错误，且错误不为EOF结束符
 	if err != nil && err != io.EOF {
-		fmt.Println("Conn Read has err: ", err)
+		fmt.Println("Conn Read has err: ", err) // server打印err
 		usr.SendMsgToClient("Conn Read has err,请检查客户端是否存在问题.\n")
 		return
 	}
@@ -147,17 +151,16 @@ func (usr *User) renameCommand() {
 func (usr *User) DoMsg(msg string) int {
 	// 消息处理
 	switch msg {
-	case "exit":
+	case "im -exit":
 		// 下线，退出命令行
-		usr.Offline()
 		return -1
-	case "who":
+	case "im -who":
 		// 查询当前在线用户列表
 		usr.whoCommand()
-	case "num":
+	case "im -num":
 		// 查询当前在线用户人数
 		usr.numCommand()
-	case "rename":
+	case "im -rename":
 		// 重命名
 		usr.renameCommand()
 	default:
