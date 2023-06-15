@@ -34,8 +34,7 @@ func NewUser(conn net.Conn, server *Server) *User {
 
 // 监听当前user channel，有消息就发给Client
 func (usr *User) ListenUsrMsg() {
-	for {
-		msg := <-usr.Chan_u
+	for msg := range usr.Chan_u {
 		usr.conn_u.Write([]byte(msg + "\n"))
 	}
 }
@@ -51,10 +50,17 @@ func (usr *User) Online() {
 	usr.server.BroadcastUsrMsg(usr, "is Online!")
 }
 
+// 用户析构销毁
+func (usr *User) destroy() {
+	usr.server.DeleteUsr(usr)
+	close(usr.Chan_u)
+	usr.conn_u.Close()
+}
+
 // 用户下线
 func (usr *User) Offline() {
-	usr.server.DeleteUsr(usr)
 	usr.server.BroadcastUsrMsg(usr, "is Offline~")
+	usr.destroy()
 }
 
 // num指令，查询当前在线用户人数

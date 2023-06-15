@@ -63,9 +63,7 @@ func (server *Server) Start() {
 
 // 广播通道监听
 func (server *Server) ListenServerMsg() {
-	for {
-		msg := <-server.Chan_s
-
+	for msg := range server.Chan_s {
 		// 广播
 		server.mapLock.Lock()
 		for _, usr := range server.OnlineMap {
@@ -91,8 +89,6 @@ func (server *Server) BroadcastUsrMsg(usr *User, msg string) {
 func (server *Server) ReceiveUsrMsg(usr *User, conn net.Conn) {
 	buf := make([]byte, server.usr_len_limit)
 	for {
-		// 考虑是否需要在某处结束协程
-
 		n, err := conn.Read(buf)
 		// 消息为空（退出程序）表示下线
 		if n == 0 {
