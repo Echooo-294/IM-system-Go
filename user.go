@@ -11,8 +11,8 @@ import (
 type User struct {
 	Name    string
 	Address string
-	Chan_u  chan string
-	conn_u  net.Conn
+	ChanUsr chan string
+	connUsr net.Conn
 	server  *Server
 }
 
@@ -24,8 +24,8 @@ func NewUser(conn net.Conn, server *Server) *User {
 	usr := &User{
 		Name:    useraddr,
 		Address: useraddr,
-		Chan_u:  make(chan string),
-		conn_u:  conn,
+		ChanUsr: make(chan string),
+		connUsr: conn,
 		server:  server,
 	}
 
@@ -37,14 +37,14 @@ func NewUser(conn net.Conn, server *Server) *User {
 
 // 监听当前user channel，有消息就发给Client
 func (usr *User) ListenUsrMsg() {
-	for msg := range usr.Chan_u {
-		usr.conn_u.Write([]byte(msg + "\n"))
+	for msg := range usr.ChanUsr {
+		usr.SendMsgToClient(msg)
 	}
 }
 
 // 给当前客户端发送消息
 func (usr *User) SendMsgToClient(msg string) {
-	usr.conn_u.Write([]byte(msg))
+	usr.connUsr.Write([]byte(msg + "\n"))
 }
 
 // 用户上线
@@ -56,36 +56,37 @@ func (usr *User) Online() {
 // 用户析构关闭资源,统一在server的Handler中defer析构
 func (usr *User) CloseResources() {
 	usr.server.DeleteUsr(usr)
-	close(usr.Chan_u)
-	usr.conn_u.Close()
+	close(usr.ChanUsr)
+	usr.connUsr.Close()
 }
 
 // 用户下线
 func (usr *User) Offline() {
 	usr.server.BroadcastUsrMsg(usr, "is Offline~")
+	usr.SendMsgToClient("You are Offline.")
 }
 
 // 用户被强制踢出
 func (usr *User) ForceOffline() {
-	usr.SendMsgToClient("You are ForceOffline.\n")
+	usr.SendMsgToClient("You are ForceOffline.")
 }
 
 // num指令，查询当前在线用户人数
 func (usr *User) numCommand() {
 	num := usr.server.GetUsrNum()
-	usr.SendMsgToClient("当前在线用户有: " + strconv.Itoa(num) + " 个.\n")
+	usr.SendMsgToClient("当前在线用户有: " + strconv.Itoa(num) + " 个.")
 }
 
 // who指令，查询当前在线用户列表
 func (usr *User) whoCommand() {
 	usrList, num := usr.server.GetUsrList()
-	usr.SendMsgToClient("当前在线用户有: " + strconv.Itoa(num) + " 个,包含以下用户:\n")
+	usr.SendMsgToClient("当前在线用户有: " + strconv.Itoa(num) + " 个,包含以下用户:")
 	msg := ""
 	for k, usrName := range usrList {
 		msg += "[" + usrName + "]" + "; "
 		// 每行5个输出
 		if (k+1)%5 == 0 || k == num-1 {
-			usr.SendMsgToClient(msg + "\n")
+			usr.SendMsgToClient(msg)
 		}
 		k++
 	}
@@ -93,58 +94,107 @@ func (usr *User) whoCommand() {
 
 // 用户命名限制
 func (usr *User) nameLimit(usrName string) bool {
-	// 不能有空格,大于3字符,小于20字符
-	if strings.Contains(usrName, " ") {
-		return false
+	// 不能有空格
+	return !strings.Contains(usrName, " ")
+}
+
+// 读取用户输入
+func (usr *User) readClient(tips string, limitDn int, limitUp int) (string, bool) {
+	usr.SendMsgToClient(tips)
+	buf := make([]byte, limitUp+1)
+	n, err := usr.connUsr.Read(buf)
+
+	// 有错误，且错误不为EOF结束符
+	if err != nil && err != io.EOF {
+		fmt.Println("Conn Read has err(readClient): ", err) // server打印err
+		return "", false
 	}
-	if len(usrName) >= 20 || len(usrName) <= 3 {
-		return false
+
+	// 消息为空（退出该步）
+	if n == 0 {
+		return "", false
 	}
-	return true
+
+	// 输入不得仅有换行符
+	if string(buf[0]) == "\n" {
+		usr.SendMsgToClient("输入内容不得为空.")
+		return "", false
+	}
+
+	// 内容长度限制
+	if n >= limitUp || n <= limitDn {
+		usr.SendMsgToClient("输入内容长度不符合要求.")
+		return "", false
+	}
+
+	// 读取n-1个字符，不读取最后的'\n'
+	return string(buf[:n-1]), true
 }
 
 // rename指令，重命名
 func (usr *User) renameCommand() {
-	usr.SendMsgToClient("请输入新用户名(不能有空格,大于3字符,小于20字符): ")
-
-	// 读取用户输入
-	buf := make([]byte, 20)
-	n, err := usr.conn_u.Read(buf)
-
-	// 有错误，且错误不为EOF结束符
-	if err != nil && err != io.EOF {
-		fmt.Println("Conn Read has err: ", err) // server打印err
-		usr.SendMsgToClient("Conn Read has err,请检查客户端是否存在问题.\n")
-		return
-	}
-
-	// 内容为空直接返回
-	if n == 0 {
-		return
-	}
-
 	// 读取n-1个字符，不读取最后的'\n'
-	newName := string(buf[:n-1])
+	newName, ok := usr.readClient("请输入新用户名(不能有空格,大于3字符,小于20字符): ", 3, 20)
+	if !ok {
+		return
+	}
 
-	// 文件名限制
+	// 不得与当前用户名相同
+	if newName == usr.Name {
+		usr.SendMsgToClient("用户名不得与当前用户名相同,请重新尝试.")
+		return
+	}
+
+	// 用户名限制
 	allow := usr.nameLimit(newName)
 	if !allow {
-		usr.SendMsgToClient("用户名不符合规范,请重新使用rename.\n")
+		usr.SendMsgToClient("用户名不符合规范,请重新尝试.")
 		return
 	}
 
 	// 判断newName是否存在
 	usr.server.mapLock.Lock()
-	_, ok := usr.server.OnlineMap[newName]
-	if ok {
-		usr.SendMsgToClient("用户名已存在,请重新使用rename.\n")
+	_, isExist := usr.server.OnlineMap[newName]
+	if isExist {
+		usr.SendMsgToClient("用户名已存在,请重新尝试.")
 	} else {
 		delete(usr.server.OnlineMap, usr.Name)
 		usr.server.OnlineMap[newName] = usr
 		usr.Name = newName
-		usr.SendMsgToClient("用户名已更新.\n")
+		usr.SendMsgToClient("用户名已更新.")
 	}
 	usr.server.mapLock.Unlock()
+}
+
+// 私聊功能
+func (usr *User) privateChat() {
+	// 读取用户输入
+	targetName, ok1 := usr.readClient("请输入私聊对象的用户名: ", 3, 20)
+	if !ok1 {
+		return
+	}
+
+	// 判断是否是给自己发送
+	if targetName == usr.Name {
+		usr.SendMsgToClient("不得与自己聊天,请重新尝试.")
+		return
+	}
+
+	// 判断是否存在该用户
+	usr.server.mapLock.Lock()
+	targetUsr, isExist := usr.server.OnlineMap[targetName]
+	usr.server.mapLock.Unlock()
+	if !isExist {
+		usr.SendMsgToClient("用户名不存在,请重新尝试.")
+		return
+	}
+
+	// 向该用户发送消息
+	msg, ok2 := usr.readClient("请输入要发送的内容: ", 1, usrMsgLenLimit)
+	if !ok2 {
+		return
+	}
+	targetUsr.SendMsgToClient("[" + usr.Name + "] send msg to you : " + msg)
 }
 
 // 用户消息业务
@@ -152,7 +202,7 @@ func (usr *User) DoMsg(msg string) int {
 	// 消息处理
 	switch msg {
 	case "im -exit":
-		// 下线，退出命令行
+		// 下线
 		return -1
 	case "im -who":
 		// 查询当前在线用户列表
@@ -163,6 +213,9 @@ func (usr *User) DoMsg(msg string) int {
 	case "im -rename":
 		// 重命名
 		usr.renameCommand()
+	case "im -to":
+		// 私聊
+		usr.privateChat()
 	default:
 		// 调用服务器广播接口
 		usr.server.BroadcastUsrMsg(usr, msg)

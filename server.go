@@ -4,9 +4,16 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strconv"
 	"sync"
 	"time"
 )
+
+// 用户消息长度限制
+const usrMsgLenLimit int = 20
+
+// 用户超时限制
+const usrTimeLimit time.Duration = time.Second * 20
 
 type Server struct {
 	Ip   string
@@ -16,20 +23,16 @@ type Server struct {
 	mapLock   sync.RWMutex
 
 	// 服务器消息广播通道
-	Chan_s chan string
-
-	// 用户消息长度限制
-	usr_len_limit int
+	ChanServer chan string
 }
 
 // 创建一个server
 func NewServer(ip string, port int) *Server {
 	server := &Server{
-		Ip:            ip,
-		Port:          port,
-		OnlineMap:     make(map[string]*User),
-		Chan_s:        make(chan string),
-		usr_len_limit: 128,
+		Ip:         ip,
+		Port:       port,
+		OnlineMap:  make(map[string]*User),
+		ChanServer: make(chan string),
 	}
 	return server
 }
@@ -64,11 +67,11 @@ func (server *Server) Start() {
 
 // 广播通道监听
 func (server *Server) ListenServerMsg() {
-	for msg := range server.Chan_s {
+	for msg := range server.ChanServer {
 		// 广播
 		server.mapLock.Lock()
 		for _, usr := range server.OnlineMap {
-			usr.Chan_u <- msg
+			usr.ChanUsr <- msg
 		}
 		server.mapLock.Unlock()
 	}
@@ -77,20 +80,27 @@ func (server *Server) ListenServerMsg() {
 // 将服务器的消息写入广播通道
 func (server *Server) BroadcastServerMsg(msg string) {
 	serverMsg := "& [Server] : " + msg
-	server.Chan_s <- serverMsg
+	server.ChanServer <- serverMsg
 }
 
 // 将某用户的消息写入广播通道
 func (server *Server) BroadcastUsrMsg(usr *User, msg string) {
 	usrMsg := "~ [" + usr.Name + "] : " + msg
-	server.Chan_s <- usrMsg
+	server.ChanServer <- usrMsg
 }
 
 // 持续接收用户输入的消息进行处理
 func (server *Server) ReceiveUsrMsg(usr *User, conn net.Conn, isLive chan bool) {
-	buf := make([]byte, server.usr_len_limit)
+	buf := make([]byte, usrMsgLenLimit+1)
 	for {
 		n, err := conn.Read(buf)
+
+		// 有错误，且错误不为EOF结束符
+		if err != nil && err != io.EOF {
+			fmt.Println("Conn Read has err(ReceiveUsrMsg): ", err) // server打印err
+			return
+		}
+
 		// 消息为空（退出程序）表示下线
 		if n == 0 {
 			usr.Offline()
@@ -98,12 +108,19 @@ func (server *Server) ReceiveUsrMsg(usr *User, conn net.Conn, isLive chan bool) 
 			return
 		}
 
-		// 有错误，且错误不为EOF结束符
-		if err != nil && err != io.EOF {
-			fmt.Println("Conn Read has err: ", err) // server打印err
-			usr.SendMsgToClient("Conn Read has err,请检查客户端是否存在问题.\n")
-			return
+		// 仅输入回车,则等待重新输入
+		if string(buf[0]) == "\n" {
+			usr.SendMsgToClient("输入内容不得为空.")
+			continue
 		}
+
+		// 输入内容长度超限
+		if n >= usrMsgLenLimit {
+			usr.SendMsgToClient("输入内容长度不符合要求.")
+			continue
+		}
+
+		// 输入不合要求也会导致用户成为不活跃状态
 
 		// 读取n-1个字符，不读取最后的'\n'，进行用户消息业务
 		msg := string(buf[:n-1])
@@ -159,12 +176,12 @@ func (server *Server) GetUsrList() ([]string, int) {
 	return usrList, num
 }
 
-// // 对刚上线的用户进行服务器公告
-// func (server *Server) NoticeOnline() {
-// 	// 提示当前在线人数
-// 	msg := "当前 " + strconv.Itoa(server.GetUsrNum()) + " 人在线."
-// 	server.BroadcastServerMsg(msg)
-// }
+// 对刚上线的用户进行服务器公告
+func (server *Server) NoticeOnline(usr *User) {
+	// 提示当前在线人数
+	msg := "欢迎来到IM服务器,\n" + "当前 " + strconv.Itoa(server.GetUsrNum()) + " 人在线."
+	usr.SendMsgToClient(msg)
+}
 
 // 业务处理
 func (server *Server) Handler(conn net.Conn) {
@@ -178,7 +195,7 @@ func (server *Server) Handler(conn net.Conn) {
 	usr.Online()
 
 	// 对刚上线的用户进行服务器公告
-	// server.NoticeOnline()
+	server.NoticeOnline(usr)
 
 	// 记录用户活跃状态的通道
 	isLive := make(chan bool)
@@ -190,11 +207,11 @@ func (server *Server) Handler(conn net.Conn) {
 	for {
 		select {
 		case s := <-isLive:
-			// true表示用户活跃,空实现辅助重置下方time;false表示用户已下线
+			// true表示用户活跃,空实现辅助重置下方time通道;false表示用户已下线
 			if !s {
 				return
 			}
-		case <-time.After(time.Second * 30):
+		case <-time.After(usrTimeLimit):
 			// 当前用户不活跃状态超时,强制当前用户下线
 			usr.ForceOffline()
 			return
