@@ -38,11 +38,11 @@ func NewServer(ip string, port int) *Server {
 }
 
 // 启动服务器
-func (server *Server) Start() {
+func (s *Server) Start() {
 	fmt.Println("Our Server is RUNNING!!!")
 
 	// socket listen
-	listener, err := net.Listen("tcp", fmt.Sprintf("%s:%d", server.Ip, server.Port))
+	listener, err := net.Listen("tcp", fmt.Sprintf("%s:%d", s.Ip, s.Port))
 	if err != nil {
 		fmt.Println("net.Listen err: ", err)
 		return
@@ -52,13 +52,13 @@ func (server *Server) Start() {
 	defer listener.Close()
 
 	// 启动监听广播通道的goroutine
-	go server.ListenServerMsg()
+	go s.ListenServerMsg()
 
 	// 持续接受链接
 	for {
 		conn, err := listener.Accept()
 		if err == nil {
-			go server.Handler(conn)
+			go s.Handler(conn)
 		} else {
 			fmt.Println("listener accept err: ", err)
 		}
@@ -66,31 +66,31 @@ func (server *Server) Start() {
 }
 
 // 广播通道监听
-func (server *Server) ListenServerMsg() {
-	for msg := range server.ChanServer {
+func (s *Server) ListenServerMsg() {
+	for msg := range s.ChanServer {
 		// 广播
-		server.mapLock.Lock()
-		for _, usr := range server.OnlineMap {
+		s.mapLock.Lock()
+		for _, usr := range s.OnlineMap {
 			usr.ChanUsr <- msg
 		}
-		server.mapLock.Unlock()
+		s.mapLock.Unlock()
 	}
 }
 
 // 将服务器的消息写入广播通道
-func (server *Server) BroadcastServerMsg(msg string) {
+func (s *Server) BroadcastServerMsg(msg string) {
 	serverMsg := "& [Server] : " + msg
-	server.ChanServer <- serverMsg
+	s.ChanServer <- serverMsg
 }
 
 // 将某用户的消息写入广播通道
-func (server *Server) BroadcastUsrMsg(usr *User, msg string) {
+func (s *Server) BroadcastUsrMsg(usr *User, msg string) {
 	usrMsg := "~ [" + usr.Name + "] : " + msg
-	server.ChanServer <- usrMsg
+	s.ChanServer <- usrMsg
 }
 
 // 持续接收用户输入的消息进行处理
-func (server *Server) ReceiveUsrMsg(usr *User, conn net.Conn, isLive chan bool) {
+func (s *Server) ReceiveUsrMsg(usr *User, conn net.Conn, isLive chan bool) {
 	buf := make([]byte, usrMsgLenLimit+1)
 	for {
 		n, err := conn.Read(buf)
@@ -141,52 +141,52 @@ func (server *Server) ReceiveUsrMsg(usr *User, conn net.Conn, isLive chan bool) 
 }
 
 // 登记用户信息
-func (server *Server) RegisterUsr(usr *User) {
-	server.mapLock.Lock()
-	server.OnlineMap[usr.Name] = usr
-	server.mapLock.Unlock()
+func (s *Server) RegisterUsr(usr *User) {
+	s.mapLock.Lock()
+	s.OnlineMap[usr.Name] = usr
+	s.mapLock.Unlock()
 }
 
 // 删除用户信息
-func (server *Server) DeleteUsr(usr *User) {
-	server.mapLock.Lock()
-	delete(server.OnlineMap, usr.Name)
-	server.mapLock.Unlock()
+func (s *Server) DeleteUsr(usr *User) {
+	s.mapLock.Lock()
+	delete(s.OnlineMap, usr.Name)
+	s.mapLock.Unlock()
 }
 
 // 获取服务器当前在线人数
-func (server *Server) GetUsrNum() int {
-	server.mapLock.Lock()
-	num := len(server.OnlineMap)
-	server.mapLock.Unlock()
+func (s *Server) UsrNum() int {
+	s.mapLock.Lock()
+	num := len(s.OnlineMap)
+	s.mapLock.Unlock()
 	return num
 }
 
 // 获取服务器当前在线用户列表
-func (server *Server) GetUsrList() ([]string, int) {
-	server.mapLock.Lock()
-	num := len(server.OnlineMap)
+func (s *Server) UsrList() ([]string, int) {
+	s.mapLock.Lock()
+	num := len(s.OnlineMap)
 	usrList := make([]string, num)
 	i := 0
-	for _, usr := range server.OnlineMap {
+	for _, usr := range s.OnlineMap {
 		usrList[i] = usr.Name
 		i++
 	}
-	server.mapLock.Unlock()
+	s.mapLock.Unlock()
 	return usrList, num
 }
 
 // 对刚上线的用户进行服务器公告
-func (server *Server) NoticeOnline(usr *User) {
+func (s *Server) NoticeOnline(usr *User) {
 	// 提示当前在线人数
-	msg := "欢迎来到IM服务器,\n" + "当前 " + strconv.Itoa(server.GetUsrNum()) + " 人在线."
+	msg := "欢迎来到IM服务器,\n" + "当前 " + strconv.Itoa(s.UsrNum()) + " 人在线."
 	usr.SendMsgToClient(msg)
 }
 
 // 业务处理
-func (server *Server) Handler(conn net.Conn) {
+func (s *Server) Handler(conn net.Conn) {
 	// 接收链接后新建一个usr
-	usr := NewUser(conn, server)
+	usr := NewUser(conn, s)
 
 	// 该函数退出后关闭usr资源
 	defer usr.CloseResources()
@@ -195,20 +195,20 @@ func (server *Server) Handler(conn net.Conn) {
 	usr.Online()
 
 	// 对刚上线的用户进行服务器公告
-	server.NoticeOnline(usr)
+	s.NoticeOnline(usr)
 
 	// 记录用户活跃状态的通道
 	isLive := make(chan bool)
 
 	// 持续接收用户输入的消息进行处理
-	go server.ReceiveUsrMsg(usr, conn, isLive)
+	go s.ReceiveUsrMsg(usr, conn, isLive)
 
 	// 阻塞
 	for {
 		select {
-		case s := <-isLive:
+		case l := <-isLive:
 			// true表示用户活跃,空实现辅助重置下方time通道;false表示用户已下线
-			if !s {
+			if !l {
 				return
 			}
 		case <-time.After(usrTimeLimit):

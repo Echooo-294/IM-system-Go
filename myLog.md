@@ -10,3 +10,6 @@
 输入内容不得为空.
 
 合理利用context关闭协程,避免forceoffline多次关闭usrconn;也可以改成关闭usr统一在handler或recive中执行
+超时强踢会报err：Conn Read has err(ReceiveUsrMsg)多次关闭usr资源
+先关闭客户端会报err：
+Conn Read has err(ReceiveUsrMsg):  read tcp 127.0.0.1:8888->127.0.0.1:54302: read: connection reset by peer
