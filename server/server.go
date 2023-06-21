@@ -52,7 +52,7 @@ func (s *Server) Start() {
 	defer listener.Close()
 
 	// 启动监听广播通道的goroutine
-	go s.ListenServerMsg()
+	go s.ListenServeMsg()
 
 	// 持续接受链接
 	for {
@@ -66,7 +66,7 @@ func (s *Server) Start() {
 }
 
 // 广播通道监听
-func (s *Server) ListenServerMsg() {
+func (s *Server) ListenServeMsg() {
 	for msg := range s.ChanServer {
 		// 广播
 		s.mapLock.Lock()
@@ -78,7 +78,7 @@ func (s *Server) ListenServerMsg() {
 }
 
 // 将服务器的消息写入广播通道
-func (s *Server) BroadcastServerMsg(msg string) {
+func (s *Server) BroadcastServeMsg(msg string) {
 	serverMsg := "& [Server] : " + msg
 	s.ChanServer <- serverMsg
 }
