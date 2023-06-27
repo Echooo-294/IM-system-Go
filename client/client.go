@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // 所连接服务器的IP
@@ -202,6 +203,8 @@ func (c *Client) Run() {
 		default:
 			c.mode = -1
 		}
+		// 设置延时,避免屏幕刷新比菜单显示慢
+		time.Sleep(time.Duration(50 * time.Millisecond))
 	}
 }
 

@@ -17,6 +17,8 @@
 Conn Read has err(ReceiveUsrMsg):  read tcp 127.0.0.1:8888->127.0.0.1:54302: read: connection reset by peer
 
 如何确认已经改好用户名和私聊消息发送成功
+在重新显示菜单前设置等待回车？或者设置重新显示菜单
+
 
 手写iocopy会导致客户端输出混乱
 	// buf := make([]byte, public.ServeMsgLenLimit+1)
