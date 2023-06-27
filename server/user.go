@@ -1,17 +1,18 @@
+/*
+服务端的用户对象
+*/
 package main
 
 import (
-	"fmt"
-	"io"
 	"net"
 	"strconv"
-	"strings"
 )
 
+// 用户结构体
 type User struct {
 	Name    string
 	Address string
-	ChanUsr chan string
+	UsrChan chan string
 	conn    net.Conn
 	server  *Server
 }
@@ -24,7 +25,7 @@ func NewUser(conn net.Conn, server *Server) *User {
 	usr := &User{
 		Name:    useraddr,
 		Address: useraddr,
-		ChanUsr: make(chan string),
+		UsrChan: make(chan string),
 		conn:    conn,
 		server:  server,
 	}
@@ -35,11 +36,13 @@ func NewUser(conn net.Conn, server *Server) *User {
 	return usr
 }
 
-// 监听当前user channel，有消息就发给Usr
+// 监听当前user channel，有消息就发给客户端
 func (u *User) ListenUsrMsg() {
-	for msg := range u.ChanUsr {
+	// 持续阻塞至用户通道关闭
+	for msg := range u.UsrChan {
 		u.SendMsgToClient(msg)
 	}
+	u.SendMsgToClient("UsrChan is Closed.")
 }
 
 // 给当前用户的客户端发送消息
@@ -49,20 +52,20 @@ func (u *User) SendMsgToClient(msg string) {
 
 // 用户上线
 func (u *User) Online() {
-	u.server.RegisterUsr(u)
-	u.server.BroadcastUsrMsg(u, "is Online!")
+	u.server.RegUsr(u)
+	u.server.BCUsrMsg(u, "is Online!")
 }
 
 // 用户析构关闭资源,统一在server的Handler中defer析构
-func (u *User) CloseResources() {
-	u.server.DeleteUsr(u)
-	close(u.ChanUsr)
+func (u *User) Close() {
+	u.server.DelUsr(u)
+	close(u.UsrChan)
 	u.conn.Close()
 }
 
 // 用户下线
 func (u *User) Offline() {
-	u.server.BroadcastUsrMsg(u, "is Offline~")
+	u.server.BCUsrMsg(u, "is Offline~")
 	u.SendMsgToClient("You are Offline.")
 }
 
@@ -92,65 +95,9 @@ func (u *User) whoCommand() {
 	}
 }
 
-// 用户命名限制
-func (u *User) nameLimit(uName string) bool {
-	// 不能有空格
-	return !strings.Contains(uName, " ")
-}
-
-// 读取用户输入
-func (u *User) readUsr(tips string, limitDn int, limitUp int) (string, bool) {
-	u.SendMsgToClient(tips)
-	buf := make([]byte, limitUp+1)
-	n, err := u.conn.Read(buf)
-
-	// 有错误，且错误不为EOF结束符
-	if err != nil && err != io.EOF {
-		fmt.Println("Conn Read has err(readUsr): ", err) // server打印err
-		return "", false
-	}
-
-	// 消息为空（退出该步）
-	if n == 0 {
-		return "", false
-	}
-
-	// 输入不得仅有换行符
-	if string(buf[0]) == "\n" {
-		u.SendMsgToClient("输入内容不得为空.")
-		return "", false
-	}
-
-	// 内容长度限制
-	if n >= limitUp || n <= limitDn {
-		u.SendMsgToClient("输入内容长度不符合要求.")
-		return "", false
-	}
-
-	// 读取n-1个字符，不读取最后的'\n'
-	return string(buf[:n-1]), true
-}
-
 // rename指令，重命名
-func (u *User) renameCommand() {
-	// 读取n-1个字符，不读取最后的'\n'
-	newName, ok := u.readUsr("请输入新用户名(不能有空格,大于3字符,小于20字符): ", 3, 20)
-	if !ok {
-		return
-	}
-
-	// 不得与当前用户名相同
-	if newName == u.Name {
-		u.SendMsgToClient("用户名不得与当前用户名相同,请重新尝试.")
-		return
-	}
-
-	// 用户名限制
-	allow := u.nameLimit(newName)
-	if !allow {
-		u.SendMsgToClient("用户名不符合规范,请重新尝试.")
-		return
-	}
+func (u *User) renameCommand(msg string) {
+	newName := msg[7:]
 
 	// 判断newName是否存在
 	u.server.mapLock.Lock()
@@ -167,18 +114,9 @@ func (u *User) renameCommand() {
 }
 
 // 私聊功能
-func (u *User) privateChat() {
+func (u *User) privateChat(msg string) {
 	// 读取用户输入
-	tName, ok1 := u.readUsr("请输入私聊对象的用户名: ", 3, 20)
-	if !ok1 {
-		return
-	}
-
-	// 判断是否是给自己发送
-	if tName == u.Name {
-		u.SendMsgToClient("不得与自己聊天,请重新尝试.")
-		return
-	}
+	tName := msg[3:]
 
 	// 判断是否存在该用户
 	u.server.mapLock.Lock()
@@ -189,11 +127,6 @@ func (u *User) privateChat() {
 		return
 	}
 
-	// 向该用户发送消息
-	msg, ok2 := u.readUsr("请输入要发送的内容: ", 1, usrMsgLenLimit)
-	if !ok2 {
-		return
-	}
 	targetUsr.SendMsgToClient("[" + u.Name + "] send msg to you : " + msg)
 }
 
@@ -201,24 +134,26 @@ func (u *User) privateChat() {
 func (u *User) DoMsg(msg string) int {
 	// 消息处理
 	switch msg {
-	case "im -exit":
+	case "exit":
 		// 下线
 		return -1
-	case "im -who":
+	case "who":
 		// 查询当前在线用户列表
 		u.whoCommand()
-	case "im -num":
+	case "num":
 		// 查询当前在线用户人数
 		u.numCommand()
-	case "im -rename":
-		// 重命名
-		u.renameCommand()
-	case "im -to":
-		// 私聊
-		u.privateChat()
 	default:
-		// 调用服务器广播接口
-		u.server.BroadcastUsrMsg(u, msg)
+		if len(msg) > 3 && msg[:3] == "to-" {
+			// 私聊
+			u.privateChat(msg)
+		} else if len(msg) > 7 && msg[:7] == "rename-" {
+			// 重命名
+			u.renameCommand(msg)
+		} else {
+			// 调用服务器广播接口
+			u.server.BCUsrMsg(u, msg)
+		}
 	}
 	return 0
 }

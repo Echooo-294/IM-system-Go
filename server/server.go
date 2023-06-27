@@ -1,7 +1,11 @@
+/*
+服务器实现,tcp协议
+*/
 package main
 
 import (
 	"fmt"
+	"im_system/public"
 	"io"
 	"net"
 	"strconv"
@@ -9,12 +13,7 @@ import (
 	"time"
 )
 
-// 用户消息长度限制
-const usrMsgLenLimit int = 20
-
-// 用户超时限制
-const usrTimeLimit time.Duration = time.Second * 20
-
+// 服务器结构体
 type Server struct {
 	Ip   string
 	Port int
@@ -23,16 +22,16 @@ type Server struct {
 	mapLock   sync.RWMutex
 
 	// 服务器消息广播通道
-	ChanServer chan string
+	ServeChan chan string
 }
 
 // 创建一个server
 func NewServer(ip string, port int) *Server {
 	server := &Server{
-		Ip:         ip,
-		Port:       port,
-		OnlineMap:  make(map[string]*User),
-		ChanServer: make(chan string),
+		Ip:        ip,
+		Port:      port,
+		OnlineMap: make(map[string]*User),
+		ServeChan: make(chan string),
 	}
 	return server
 }
@@ -57,41 +56,43 @@ func (s *Server) Start() {
 	// 持续接受链接
 	for {
 		conn, err := listener.Accept()
-		if err == nil {
-			go s.Handler(conn)
-		} else {
+		if err != nil {
 			fmt.Println("listener accept err: ", err)
+		} else {
+			go s.Handler(conn)
 		}
 	}
 }
 
 // 广播通道监听
 func (s *Server) ListenServeMsg() {
-	for msg := range s.ChanServer {
-		// 广播
+	// 持续阻塞至广播通道关闭
+	for msg := range s.ServeChan {
+		// 有消息则广播
 		s.mapLock.Lock()
 		for _, usr := range s.OnlineMap {
-			usr.ChanUsr <- msg
+			usr.UsrChan <- msg
 		}
 		s.mapLock.Unlock()
 	}
+	fmt.Println("ServeChan is Closed.")
 }
 
 // 将服务器的消息写入广播通道
-func (s *Server) BroadcastServeMsg(msg string) {
-	serverMsg := "& [Server] : " + msg
-	s.ChanServer <- serverMsg
+func (s *Server) BCServeMsg(msg string) {
+	serverMsg := "~ [Server] : " + msg
+	s.ServeChan <- serverMsg
 }
 
 // 将某用户的消息写入广播通道
-func (s *Server) BroadcastUsrMsg(usr *User, msg string) {
-	usrMsg := "~ [" + usr.Name + "] : " + msg
-	s.ChanServer <- usrMsg
+func (s *Server) BCUsrMsg(usr *User, msg string) {
+	usrMsg := "# [" + usr.Name + "] : " + msg
+	s.ServeChan <- usrMsg
 }
 
 // 持续接收用户输入的消息进行处理
-func (s *Server) ReceiveUsrMsg(usr *User, conn net.Conn, isLive chan bool) {
-	buf := make([]byte, usrMsgLenLimit+1)
+func (s *Server) RecvUsrMsg(usr *User, conn net.Conn, isLive chan bool) {
+	buf := make([]byte, public.UsrMsgMaxLen+1)
 	for {
 		n, err := conn.Read(buf)
 
@@ -115,7 +116,7 @@ func (s *Server) ReceiveUsrMsg(usr *User, conn net.Conn, isLive chan bool) {
 		}
 
 		// 输入内容长度超限
-		if n >= usrMsgLenLimit {
+		if n >= public.UsrMsgMaxLen {
 			usr.SendMsgToClient("输入内容长度不符合要求.")
 			continue
 		}
@@ -141,14 +142,14 @@ func (s *Server) ReceiveUsrMsg(usr *User, conn net.Conn, isLive chan bool) {
 }
 
 // 登记用户信息
-func (s *Server) RegisterUsr(usr *User) {
+func (s *Server) RegUsr(usr *User) {
 	s.mapLock.Lock()
 	s.OnlineMap[usr.Name] = usr
 	s.mapLock.Unlock()
 }
 
 // 删除用户信息
-func (s *Server) DeleteUsr(usr *User) {
+func (s *Server) DelUsr(usr *User) {
 	s.mapLock.Lock()
 	delete(s.OnlineMap, usr.Name)
 	s.mapLock.Unlock()
@@ -177,9 +178,9 @@ func (s *Server) UsrList() ([]string, int) {
 }
 
 // 对刚上线的用户进行服务器公告
-func (s *Server) NoticeOnline(usr *User) {
+func (s *Server) OnlineNotice(usr *User) {
 	// 提示当前在线人数
-	msg := "欢迎来到IM服务器,\n" + "当前 " + strconv.Itoa(s.UsrNum()) + " 人在线."
+	msg := "欢迎来到IM服务器, " + "当前 " + strconv.Itoa(s.UsrNum()) + " 人在线."
 	usr.SendMsgToClient(msg)
 }
 
@@ -189,29 +190,29 @@ func (s *Server) Handler(conn net.Conn) {
 	usr := NewUser(conn, s)
 
 	// 该函数退出后关闭usr资源
-	defer usr.CloseResources()
+	defer usr.Close()
 
 	// 用户上线，登记并广播
 	usr.Online()
 
 	// 对刚上线的用户进行服务器公告
-	s.NoticeOnline(usr)
+	s.OnlineNotice(usr)
 
 	// 记录用户活跃状态的通道
 	isLive := make(chan bool)
 
 	// 持续接收用户输入的消息进行处理
-	go s.ReceiveUsrMsg(usr, conn, isLive)
+	go s.RecvUsrMsg(usr, conn, isLive)
 
 	// 阻塞
 	for {
 		select {
-		case l := <-isLive:
+		case a := <-isLive:
 			// true表示用户活跃,空实现辅助重置下方time通道;false表示用户已下线
-			if !l {
+			if !a {
 				return
 			}
-		case <-time.After(usrTimeLimit):
+		case <-time.After(public.UsrMaxTime):
 			// 当前用户不活跃状态超时,强制当前用户下线
 			usr.ForceOffline()
 			return
