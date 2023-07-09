@@ -4,8 +4,10 @@
 package main
 
 import (
+	"im_system/public"
 	"net"
 	"strconv"
+	"strings"
 )
 
 // 用户结构体
@@ -97,7 +99,7 @@ func (u *User) whoCommand() {
 
 // rename指令，重命名
 func (u *User) renameCommand(msg string) {
-	newName := msg[7:]
+	newName := msg[11:]
 
 	// 判断newName是否存在
 	u.server.mapLock.Lock()
@@ -116,38 +118,40 @@ func (u *User) renameCommand(msg string) {
 // 私聊功能
 func (u *User) privateChat(msg string) {
 	// 读取用户输入
-	tName := msg[3:]
+	i := strings.Index(msg, "\n")
+	tName := msg[7:i]
+	tmsg := msg[i+1:]
 
 	// 判断是否存在该用户
 	u.server.mapLock.Lock()
-	targetUsr, isExist := u.server.OnlineMap[tName]
+	tUsr, isExist := u.server.OnlineMap[tName]
 	u.server.mapLock.Unlock()
 	if !isExist {
 		u.SendMsgToClient("用户名不存在,请重新尝试.")
 		return
 	}
 
-	targetUsr.SendMsgToClient("[" + u.Name + "] send msg to you : " + msg)
+	tUsr.SendMsgToClient("# [" + u.Name + "] send msg to you : " + tmsg)
 }
 
 // 用户消息业务
 func (u *User) DoMsg(msg string) int {
 	// 消息处理
 	switch msg {
-	case "exit":
+	case public.UsrOrderList["exit"]:
 		// 下线
 		return -1
-	case "who":
+	case public.UsrOrderList["who"]:
 		// 查询当前在线用户列表
 		u.whoCommand()
-	case "num":
+	case public.UsrOrderList["num"]:
 		// 查询当前在线用户人数
 		u.numCommand()
 	default:
-		if len(msg) > 3 && msg[:3] == "to-" {
+		if len(msg) > 7 && msg[:7] == public.UsrOrderList["to"] {
 			// 私聊
 			u.privateChat(msg)
-		} else if len(msg) > 7 && msg[:7] == "rename-" {
+		} else if len(msg) > 11 && msg[:11] == public.UsrOrderList["rename"] {
 			// 重命名
 			u.renameCommand(msg)
 		} else {

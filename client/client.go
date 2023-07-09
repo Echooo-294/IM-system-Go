@@ -18,6 +18,10 @@ var gServeIp string
 // 所连接服务器的gServePort
 var gServePort int
 
+// 客户端功能列表
+var modeList []string
+var funcList []func()
+
 // 包的初始化
 func init() {
 	// 命令行参数定义
@@ -52,6 +56,11 @@ func NewClient(serveIp string, servePort int) *Client {
 	}
 	client.conn = conn
 
+	a := [...]string{"退出", "查询在线用户数量", "查询在线用户列表", "公聊模式", "私聊模式", "更新用户名", "清屏"}
+	modeList = a[:]
+	b := [...]func(){client.exitClient, client.clientNum, client.clientList, client.publicChat, client.privateChat, client.updateName, public.CallClear}
+	funcList = b[:]
+
 	return client
 }
 
@@ -65,7 +74,6 @@ func (c *Client) DealResponse() {
 func (c *Client) menu() bool {
 	var mode int
 	fmt.Println("目前功能有: ")
-	modeList := [...]string{"退出", "公聊模式", "私聊模式", "更新用户名", "清屏"}
 
 	for i, modeName := range modeList {
 		fmt.Println(strconv.Itoa(i), ".", modeName)
@@ -79,7 +87,7 @@ func (c *Client) menu() bool {
 		c.mode = mode
 		return true
 	} else {
-		fmt.Println("...请输入合法范围内的数字...")
+		fmt.Println("请输入合法范围内的数字...")
 		return false
 	}
 }
@@ -122,7 +130,7 @@ func (c *Client) nameLimit(newName string) bool {
 }
 
 // 更新用户名
-func (c *Client) UpdateName() {
+func (c *Client) updateName() {
 	// 读取用户输入
 	newName, ok := c.readClient("请输入新用户名(不能有空格,3-20字符): ", 3, 20)
 	if !ok {
@@ -136,7 +144,7 @@ func (c *Client) UpdateName() {
 		return
 	}
 
-	order := "rename-" + newName + "\n"
+	order := public.UsrOrderList["rename"] + newName + "\n"
 	_, err := c.conn.Write([]byte(order))
 	if err != nil {
 		fmt.Println("Conn Write has err(UpdateName): ", err)
@@ -148,7 +156,9 @@ func (c *Client) UpdateName() {
 }
 
 // 私聊功能
-func (c *Client) PrivateChat() {
+func (c *Client) privateChat() {
+	fmt.Println("-私聊模式-")
+
 	// 读取用户输入
 	tName, ok := c.readClient("请输入私聊对象的用户名: ", 3, 20)
 	if !ok {
@@ -161,12 +171,12 @@ func (c *Client) PrivateChat() {
 		return
 	}
 
-	tMsg, allow := c.readClient("请输入要发送的内容: ", 1, public.UsrMsgMaxLen)
+	tMsg, allow := c.readClient("请输入要发送的内容,退出输入im -exit: ", 1, public.UsrMsgMaxLen)
 	if !allow {
 		return
 	}
 
-	order := "to-" + tName + "\n" + tMsg + "\n"
+	order := public.UsrOrderList["to"] + tName + "\n" + tMsg + "\n"
 	_, err := c.conn.Write([]byte(order))
 	if err != nil {
 		fmt.Println("Conn Write has err(PrivateChat): ", err)
@@ -178,7 +188,50 @@ func (c *Client) PrivateChat() {
 
 // 退出客户端
 func (c *Client) exitClient() {
+	order := public.UsrOrderList["exit"] + "\n"
+	_, err := c.conn.Write([]byte(order))
+	if err != nil {
+		fmt.Println("Conn Write has err(exitClient): ", err)
+		return
+	}
+}
 
+// 公聊功能
+func (c *Client) publicChat() {
+	fmt.Println("-公聊模式-")
+
+	// 读取用户输入
+	msg, ok := c.readClient("请输入公聊广播内容,退出输入im -exit: ", 1, public.UsrMsgMaxLen)
+	if !ok {
+		return
+	}
+
+	order := msg + "\n"
+	_, err := c.conn.Write([]byte(order))
+	if err != nil {
+		fmt.Println("Conn Write has err(publicChat): ", err)
+		return
+	}
+}
+
+// 查询在线用户数量
+func (c *Client) clientNum() {
+	order := public.UsrOrderList["num"] + "\n"
+	_, err := c.conn.Write([]byte(order))
+	if err != nil {
+		fmt.Println("Conn Write has err(clientNum): ", err)
+		return
+	}
+}
+
+// 查询在线用户列表
+func (c *Client) clientList() {
+	order := public.UsrOrderList["who"] + "\n"
+	_, err := c.conn.Write([]byte(order))
+	if err != nil {
+		fmt.Println("Conn Write has err(clientList): ", err)
+		return
+	}
 }
 
 // 启动客户端业务
@@ -187,22 +240,7 @@ func (c *Client) Run() {
 	for c.mode != 0 {
 		for !c.menu() {
 		}
-		switch c.mode {
-		case 0:
-			fmt.Println("-退出-")
-			c.exitClient()
-		case 1:
-			fmt.Println("-公聊模式-")
-		case 2:
-			fmt.Println("-私聊模式-")
-		case 3:
-			fmt.Println("-更新用户名-")
-			c.UpdateName()
-		case 4:
-			public.CallClear()
-		default:
-			c.mode = -1
-		}
+		funcList[c.mode]()
 		// 设置延时,避免屏幕刷新比菜单显示慢
 		time.Sleep(time.Duration(50 * time.Millisecond))
 	}
@@ -211,6 +249,7 @@ func (c *Client) Run() {
 func main() {
 	// 运行程序后，启用命令行解析
 	flag.Parse()
+
 	client := NewClient(gServeIp, gServePort)
 	if client == nil {
 		fmt.Println("Client creation failed to connect to the server...")
