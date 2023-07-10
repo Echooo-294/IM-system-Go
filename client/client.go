@@ -171,16 +171,20 @@ func (c *Client) privateChat() {
 		return
 	}
 
-	tMsg, allow := c.readClient("请输入要发送的内容,退出输入im -exit: ", 1, public.UsrMsgMaxLen)
-	if !allow {
-		return
-	}
+	tMsg, allow := c.readClient("请输入私聊内容,退出输入im-exit: ", 1, public.UsrMsgMaxLen)
 
-	order := public.UsrOrderList["to"] + tName + "\n" + tMsg + "\n"
-	_, err := c.conn.Write([]byte(order))
-	if err != nil {
-		fmt.Println("Conn Write has err(PrivateChat): ", err)
-		return
+	for tMsg != public.UsrOrderList["exit"] {
+		if allow {
+			order := public.UsrOrderList["to"] + tName + "|" + tMsg + "\n"
+			_, err := c.conn.Write([]byte(order))
+			if err != nil {
+				fmt.Println("Conn Write has err(PrivateChat): ", err)
+				return
+			}
+		}
+		// 设置延时,避免服务器内容输出比客户端屏幕显示慢
+		time.Sleep(time.Duration(50 * time.Millisecond))
+		tMsg, allow = c.readClient("请输入私聊内容,退出输入im-exit: ", 1, public.UsrMsgMaxLen)
 	}
 
 	// 如何确认消息已成功发送
@@ -199,18 +203,21 @@ func (c *Client) exitClient() {
 // 公聊功能
 func (c *Client) publicChat() {
 	fmt.Println("-公聊模式-")
-
 	// 读取用户输入
-	msg, ok := c.readClient("请输入公聊广播内容,退出输入im -exit: ", 1, public.UsrMsgMaxLen)
-	if !ok {
-		return
-	}
+	msg, ok := c.readClient("请输入公聊广播内容,退出输入im-exit: ", 1, public.UsrMsgMaxLen)
 
-	order := msg + "\n"
-	_, err := c.conn.Write([]byte(order))
-	if err != nil {
-		fmt.Println("Conn Write has err(publicChat): ", err)
-		return
+	for msg != public.UsrOrderList["exit"] {
+		if ok {
+			order := msg + "\n"
+			_, err := c.conn.Write([]byte(order))
+			if err != nil {
+				fmt.Println("Conn Write has err(publicChat): ", err)
+				return
+			}
+		}
+		// 设置延时,避免服务器内容输出比客户端屏幕显示慢
+		time.Sleep(time.Duration(50 * time.Millisecond))
+		msg, ok = c.readClient("请输入公聊广播内容,退出输入im-exit: ", 1, public.UsrMsgMaxLen)
 	}
 }
 
@@ -238,11 +245,11 @@ func (c *Client) clientList() {
 func (c *Client) Run() {
 	// 显示菜单等待用户输入
 	for c.mode != 0 {
-		for !c.menu() {
+		if c.menu() {
+			funcList[c.mode]()
+			// 设置延时,避免服务器内容输出比客户端屏幕显示慢
+			time.Sleep(time.Duration(50 * time.Millisecond))
 		}
-		funcList[c.mode]()
-		// 设置延时,避免屏幕刷新比菜单显示慢
-		time.Sleep(time.Duration(50 * time.Millisecond))
 	}
 }
 

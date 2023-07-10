@@ -99,7 +99,8 @@ func (u *User) whoCommand() {
 
 // rename指令，重命名
 func (u *User) renameCommand(msg string) {
-	newName := msg[11:]
+	n := len(public.UsrOrderList["rename"])
+	newName := msg[n:]
 
 	// 判断newName是否存在
 	u.server.mapLock.Lock()
@@ -118,8 +119,9 @@ func (u *User) renameCommand(msg string) {
 // 私聊功能
 func (u *User) privateChat(msg string) {
 	// 读取用户输入
-	i := strings.Index(msg, "\n")
-	tName := msg[7:i]
+	n := len(public.UsrOrderList["to"])
+	i := strings.Index(msg, "|")
+	tName := msg[n:i]
 	tmsg := msg[i+1:]
 
 	// 判断是否存在该用户
@@ -148,10 +150,12 @@ func (u *User) DoMsg(msg string) int {
 		// 查询当前在线用户人数
 		u.numCommand()
 	default:
-		if len(msg) > 7 && msg[:7] == public.UsrOrderList["to"] {
+		n1 := len(public.UsrOrderList["to"])
+		n2 := len(public.UsrOrderList["rename"])
+		if len(msg) > n1 && msg[:n1] == public.UsrOrderList["to"] {
 			// 私聊
 			u.privateChat(msg)
-		} else if len(msg) > 11 && msg[:11] == public.UsrOrderList["rename"] {
+		} else if len(msg) > n2 && msg[:n2] == public.UsrOrderList["rename"] {
 			// 重命名
 			u.renameCommand(msg)
 		} else {

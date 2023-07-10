@@ -18,9 +18,9 @@ var UsrOrderList map[string]string
 
 func init() {
 	UsrOrderList = make(map[string]string)
-	UsrOrderList["exit"] = "im -exit"
-	UsrOrderList["who"] = "im -who"
-	UsrOrderList["num"] = "im -num"
-	UsrOrderList["rename"] = "im -rename "
-	UsrOrderList["to"] = "im -to "
+	UsrOrderList["exit"] = "im-exit"
+	UsrOrderList["who"] = "im-who"
+	UsrOrderList["num"] = "im-num"
+	UsrOrderList["rename"] = "im-rename-"
+	UsrOrderList["to"] = "im-to-"
 }
